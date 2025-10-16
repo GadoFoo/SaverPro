@@ -3,5 +3,3 @@ Flask-Cors
 yt-dlp
 gunicorn
 ffmpeg-python
-requests
-
