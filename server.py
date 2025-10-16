@@ -16,11 +16,15 @@ def download_video():
         return jsonify({"error": "No URL provided"}), 400
 
     try:
-        # Create temporary directory
+        # Temporary folder
         temp_dir = tempfile.mkdtemp()
         output_path = os.path.join(temp_dir, "video.mp4")
 
-        # yt-dlp options
+        # Fix TikTok mobile short URLs
+        if "tiktok.com/t/" in url:
+            # yt-dlp can handle redirects automatically, no need to modify link
+            pass
+
         ydl_opts = {
             "outtmpl": output_path,
             "format": "bestvideo+bestaudio/best",
@@ -41,17 +45,13 @@ def download_video():
             ),
         }
 
-        # Handle mobile TikTok links like https://www.tiktok.com/t/ZTMP6LgRm/
-        if "tiktok.com/t/" in url:
-            url = url.replace("tiktok.com/t/", "www.tiktok.com/@", 1)
-
         # Download the video
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
 
-        # Verify that the file exists and has size
+        # Check if file exists and valid
         if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
-            return jsonify({"error": "Download failed or file empty"}), 500
+            return jsonify({"error": "Video download failed"}), 500
 
         return send_file(
             output_path,
