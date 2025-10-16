@@ -1,14 +1,11 @@
-import os
-import subprocess
-import requests
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, send_file, jsonify
 from flask_cors import CORS
+import yt_dlp
+import tempfile
+import os
 
 app = Flask(__name__)
 CORS(app)
-
-DOWNLOADS_FOLDER = "downloads"
-os.makedirs(DOWNLOADS_FOLDER, exist_ok=True)
 
 @app.route("/download", methods=["POST"])
 def download_video():
@@ -16,56 +13,57 @@ def download_video():
     url = data.get("url")
 
     if not url:
-        return jsonify({"error": "Missing URL"}), 400
+        return jsonify({"error": "No URL provided"}), 400
 
-    # Handle TikTok short links like https://www.tiktok.com/t/...
-    if "tiktok.com/t/" in url:
-        try:
-            print("Resolving TikTok short link...")
-            response = requests.get(url, allow_redirects=True, timeout=10)
-            url = response.url  # real video URL
-            print(f"Resolved TikTok URL: {url}")
-        except Exception as e:
-            return jsonify({"error": f"Failed to resolve TikTok short link: {e}"}), 400
+    try:
+        # Create temporary directory
+        temp_dir = tempfile.mkdtemp()
+        output_path = os.path.join(temp_dir, "video.mp4")
 
-    output_path = os.path.join(DOWNLOADS_FOLDER, "%(title)s.%(ext)s")
+        # yt-dlp options
+        ydl_opts = {
+            "outtmpl": output_path,
+            "format": "bestvideo+bestaudio/best",
+            "merge_output_format": "mp4",
+            "quiet": True,
+            "noplaylist": True,
+            "postprocessors": [
+                {
+                    "key": "FFmpegVideoConvertor",
+                    "preferedformat": "mp4"
+                }
+            ],
+            "source_address": "0.0.0.0",
+            "user_agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/108.0.0.0 Safari/537.36"
+            ),
+        }
 
-    # Base yt-dlp command
-    ytdlp_cmd = [
-        "yt-dlp",
-        "-f", "bestvideo+bestaudio/best",
-        "--merge-output-format", "mp4",
-        "-o", output_path,
-        url
-    ]
+        # Handle mobile TikTok links like https://www.tiktok.com/t/ZTMP6LgRm/
+        if "tiktok.com/t/" in url:
+            url = url.replace("tiktok.com/t/", "www.tiktok.com/@", 1)
 
-    # Add cookies if available
-    if os.path.exists("cookies.txt"):
-        ytdlp_cmd.insert(1, "--cookies")
-        ytdlp_cmd.insert(2, "cookies.txt")
+        # Download the video
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
 
-    # TikTok fixes
-    if "tiktok.com" in url:
-        ytdlp_cmd += [
-            "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-            "--no-check-certificate",
-            "--fixup", "never"
-        ]
+        # Verify that the file exists and has size
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            return jsonify({"error": "Download failed or file empty"}), 500
 
-    print("Running:", " ".join(ytdlp_cmd))
-    result = subprocess.run(ytdlp_cmd, capture_output=True, text=True)
+        return send_file(
+            output_path,
+            as_attachment=True,
+            download_name="video.mp4",
+            mimetype="video/mp4"
+        )
 
-    if result.returncode != 0:
-        return jsonify({"error": result.stderr}), 500
-
-    # Send downloaded file back
-    files = [f for f in os.listdir(DOWNLOADS_FOLDER) if os.path.isfile(os.path.join(DOWNLOADS_FOLDER, f))]
-    if files:
-        latest = max(files, key=lambda f: os.path.getctime(os.path.join(DOWNLOADS_FOLDER, f)))
-        return send_file(os.path.join(DOWNLOADS_FOLDER, latest), as_attachment=True)
-
-    return jsonify({"error": "No file found after download."}), 404
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8080)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
