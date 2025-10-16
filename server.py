@@ -20,7 +20,7 @@ def download_video():
     if not url:
         return jsonify({"error": "Missing URL"}), 400
 
-    # Resolve TikTok short links (e.g. https://www.tiktok.com/t/...)
+    # Resolve TikTok short links
     if "tiktok.com/t/" in url:
         try:
             r = requests.get(url, allow_redirects=True, timeout=10)
@@ -29,21 +29,19 @@ def download_video():
             return jsonify({"error": f"Failed to resolve TikTok short link: {e}"}), 400
 
     # Clean old downloads
-    for f in glob.glob(os.path.join(DOWNLOADS_FOLDER, "*")):
+    files = glob.glob(os.path.join(DOWNLOADS_FOLDER, "*"))
+    for f in files:
         os.remove(f)
 
-    # Create a unique output filename
-    unique_name = f"video_{uuid.uuid4().hex[:8]}"
-    output_path = os.path.join(DOWNLOADS_FOLDER, f"{unique_name}.mp4")
+    # Unique filename (so iPhone doesn’t cache or overwrite)
+    output_path = os.path.join(DOWNLOADS_FOLDER, f"video_{uuid.uuid4().hex[:8]}.mp4")
 
-    # yt-dlp command - ensures proper audio+video merge and supports long videos
+    # yt-dlp command — fixed for full videos + audio on all devices
     ytdlp_cmd = [
         "yt-dlp",
-        "-f", "bv*+ba/b",  # best video + best audio fallback
+        "-f", "bv*+ba/b",  # best video + audio (merged)
         "--merge-output-format", "mp4",
         "--no-playlist",
-        "--add-metadata",
-        "--embed-thumbnail",
         "--retries", "10",
         "--fragment-retries", "10",
         "--buffer-size", "16M",
@@ -51,18 +49,16 @@ def download_video():
         url
     ]
 
-    # Use cookies.txt if it exists (helps with YouTube restrictions)
+    # Add cookies if available (helps with YouTube age/gated/HD)
     if os.path.exists("cookies.txt"):
         ytdlp_cmd.insert(1, "--cookies")
         ytdlp_cmd.insert(2, "cookies.txt")
 
-    # Run yt-dlp
     result = subprocess.run(ytdlp_cmd, capture_output=True, text=True)
 
     if result.returncode != 0:
         return jsonify({"error": result.stderr}), 500
 
-    # Find the downloaded video file
     downloaded_files = glob.glob(os.path.join(DOWNLOADS_FOLDER, "*.mp4"))
     if not downloaded_files:
         return jsonify({"error": "No video found after download."}), 404
@@ -70,14 +66,7 @@ def download_video():
     latest_video = max(downloaded_files, key=os.path.getctime)
     filename = os.path.basename(latest_video)
 
-    # Return the file with correct MIME type (for iPhone & browser support)
-    return send_file(
-        latest_video,
-        as_attachment=True,
-        download_name=filename,
-        mimetype="video/mp4",
-        conditional=True
-    )
+    return send_file(latest_video, as_attachment=True, download_name=filename, mimetype="video/mp4")
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
