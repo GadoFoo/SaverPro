@@ -2,7 +2,6 @@ import os
 import subprocess
 import requests
 import uuid
-import glob
 from flask import Flask, request, jsonify, send_file
 from flask_cors import CORS
 
@@ -20,7 +19,7 @@ def download_video():
     if not url:
         return jsonify({"error": "Missing URL"}), 400
 
-    # Resolve TikTok short URLs
+    # Resolve TikTok short links if used
     if "tiktok.com/t/" in url:
         try:
             r = requests.get(url, allow_redirects=True, timeout=10)
@@ -28,29 +27,26 @@ def download_video():
         except Exception as e:
             return jsonify({"error": f"Failed to resolve TikTok link: {e}"}), 400
 
-    # Clean old downloads
-    for f in glob.glob(os.path.join(DOWNLOADS_FOLDER, "*")):
-        os.remove(f)
-
-    # Unique filename to avoid caching and overwriting
-    unique_name = str(uuid.uuid4())[:8]
+    # Unique output filename (prevents overwriting or cache)
+    unique_name = f"video_{uuid.uuid4().hex[:8]}"
     output_path = os.path.join(DOWNLOADS_FOLDER, f"{unique_name}.mp4")
 
-    # yt-dlp command
+    # yt-dlp command to ensure full-length, merged, audio+video output
     ytdlp_cmd = [
         "yt-dlp",
-        "-f", "bv*+ba/b",
+        "-f", "bv*+ba/b",  # best video + best audio
         "--merge-output-format", "mp4",
         "--no-playlist",
-        "--retries", "5",
-        "--embed-metadata",
-        "--embed-thumbnail",
         "--add-metadata",
+        "--embed-metadata",
+        "--retries", "10",
+        "--fragment-retries", "10",
+        "--buffer-size", "16M",
         "-o", output_path,
         url
     ]
 
-    # Optional cookies.txt for restricted videos
+    # Optional cookies.txt for restricted YouTube videos
     if os.path.exists("cookies.txt"):
         ytdlp_cmd.insert(1, "--cookies")
         ytdlp_cmd.insert(2, "cookies.txt")
@@ -58,9 +54,16 @@ def download_video():
     result = subprocess.run(ytdlp_cmd, capture_output=True, text=True)
 
     if result.returncode != 0 or not os.path.exists(output_path):
-        return jsonify({"error": result.stderr}), 500
+        return jsonify({"error": f"Download failed: {result.stderr}"}), 500
 
-    return send_file(output_path, as_attachment=True, download_name=f"saverpro_{unique_name}.mp4", mimetype="video/mp4")
+    # Mobile browsers (especially iPhones) need explicit filename + type
+    return send_file(
+        output_path,
+        as_attachment=True,
+        download_name=f"{unique_name}.mp4",
+        mimetype="video/mp4",
+        conditional=True
+    )
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
