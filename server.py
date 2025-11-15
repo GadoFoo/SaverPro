@@ -29,35 +29,33 @@ def download_video():
             return jsonify({"error": f"Failed to resolve TikTok short link: {e}"}), 400
 
     # Clean old downloads
-    files = glob.glob(os.path.join(DOWNLOADS_FOLDER, "*"))
-    for f in files:
+    for f in glob.glob(os.path.join(DOWNLOADS_FOLDER, "*")):
         os.remove(f)
 
-    # Unique filename (so iPhone doesn’t cache or overwrite)
+    # Unique filename
     output_path = os.path.join(DOWNLOADS_FOLDER, f"video_{uuid.uuid4().hex[:8]}.mp4")
 
-    # yt-dlp command — fixed for full videos + audio on all devices
+    # yt-dlp command
     ytdlp_cmd = [
         "yt-dlp",
-        "-f", "bv*+ba/b",  # best video + audio (merged)
+        "-f", "bestvideo+bestaudio/best",
         "--merge-output-format", "mp4",
         "--no-playlist",
         "--retries", "10",
         "--fragment-retries", "10",
-        "--buffer-size", "16M",
         "-o", output_path,
         url
     ]
 
-    # Add cookies if available (helps with YouTube age/gated/HD)
+    # Add cookies if available
     if os.path.exists("cookies.txt"):
         ytdlp_cmd.insert(1, "--cookies")
         ytdlp_cmd.insert(2, "cookies.txt")
 
-    result = subprocess.run(ytdlp_cmd, capture_output=True, text=True)
-
-    if result.returncode != 0:
-        return jsonify({"error": result.stderr}), 500
+    try:
+        result = subprocess.run(ytdlp_cmd, capture_output=True, text=True, check=True)
+    except subprocess.CalledProcessError as e:
+        return jsonify({"error": e.stderr}), 500
 
     downloaded_files = glob.glob(os.path.join(DOWNLOADS_FOLDER, "*.mp4"))
     if not downloaded_files:
@@ -67,6 +65,7 @@ def download_video():
     filename = os.path.basename(latest_video)
 
     return send_file(latest_video, as_attachment=True, download_name=filename, mimetype="video/mp4")
+
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
